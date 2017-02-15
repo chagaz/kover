@@ -35,6 +35,10 @@ from .set_covering_machine.scm import SetCoveringMachine
 from ..utils import _duplicate_last_element, _unpack_binary_bytes_from_ints
 
 def _get_metrics(predictions, answers):
+    """
+    Note: it's best if the dict values are Python lists rather than Numpy arrays, since we save some results in json
+
+    """
     if len(predictions.shape) == 1:
         predictions = predictions.reshape(1, -1)
     metrics = defaultdict(list)
@@ -109,7 +113,7 @@ def _predictions(model, kmer_matrix, train_example_idx, test_example_idx, progre
     return train_predictions, test_predictions
 
 
-def _cv_score_hp(hp_values, max_rules, dataset_file, split_name):
+def _cv_score_hp(hp_values, max_rules, dataset_file, split_name, score_type="risk", fbeta=1.0):
     model_type = hp_values[0]
     p = hp_values[1]
 
@@ -158,8 +162,16 @@ def _cv_score_hp(hp_values, max_rules, dataset_file, split_name):
                       tiebreaker=tiebreaker,
                       iteration_callback=iteration_callback)
         test_predictions_by_model_length = np.array(_duplicate_last_element(test_predictions_by_model_length, max_rules))
-        fold_score_by_model_length[i] = _get_metrics(test_predictions_by_model_length,
-                                                       dataset.phenotype.metadata[test_example_idx])["risk"]
+
+        # Compute the fold score using the correct metric
+        metrics = _get_metrics(test_predictions_by_model_length, dataset.phenotype.metadata[test_example_idx])
+        if score_type == "risk":
+            fold_score_by_model_length[i] = metrics["risk"]
+        elif score_type == "fbeta":
+            precision = np.array(metrics["precision"])
+            recall = np.array(metrics["recall"])
+            fbeta_score = (1.0 + fbeta**2) * precision * recall / ((fbeta**2 * precision) + recall)
+            fold_score_by_model_length[i] = -1.0 * fbeta_score  # to fit into the minimizing machinery
 
     score_by_model_length = np.mean(fold_score_by_model_length, axis=0)
     best_score_idx = np.argmin(score_by_model_length)
@@ -170,7 +182,7 @@ def _cv_score_hp(hp_values, max_rules, dataset_file, split_name):
 
 
 def _cross_validation(dataset_file, split_name, model_types, p_values, max_rules, n_cpu, progress_callback,
-                      warning_callback, error_callback):
+                      warning_callback, error_callback, score_type="risk", fbeta=1.0):
     """
     Returns the best parameter combination and its cv score
     """
@@ -179,7 +191,8 @@ def _cross_validation(dataset_file, split_name, model_types, p_values, max_rules
 
     logging.debug("Using %d CPUs." % n_cpu)
     pool = Pool(processes=n_cpu)
-    hp_eval_func = partial(_cv_score_hp, dataset_file=dataset_file, split_name=split_name, max_rules=max_rules)
+    hp_eval_func = partial(_cv_score_hp, dataset_file=dataset_file, split_name=split_name, max_rules=max_rules,
+                           score_type=score_type, fbeta=fbeta)
 
     best_hp_score = 1.0
     best_hp = {"model_type": None, "p": None, "max_rules": None}
@@ -196,6 +209,10 @@ def _cross_validation(dataset_file, split_name, model_types, p_values, max_rules
             best_hp["p"] = hp[1]
             best_hp["max_rules"] = hp[2]
             best_hp_score = score
+
+        if score_type == "fbeta":
+            best_hp_score *= -1.0  # Make it positive so the user isn't confused by negative scores
+
     return best_hp_score, best_hp
 
 
@@ -414,7 +431,8 @@ def _bound_selection(dataset_file, split_name, model_types, p_values, max_rules,
 
 
 def learn(dataset_file, split_name, model_type, p, max_rules, max_equiv_rules, parameter_selection, n_cpu, random_seed,
-          bound_delta=None, bound_max_genome_size=None, progress_callback=None, warning_callback=None, error_callback=None):
+          bound_delta=None, bound_max_genome_size=None, cv_fbeta=None, progress_callback=None, warning_callback=None,
+          error_callback=None):
     """
     parameter_selection: bound, cv, none (use first value of each if multiple)
     """
@@ -458,8 +476,11 @@ def learn(dataset_file, split_name, model_type, p, max_rules, max_equiv_rules, p
         n_folds = len(dataset.get_split(split_name).folds)
         if n_folds < 1:
             error_callback(Exception("Cross-validation cannot be performed on a split with no folds."))
-        best_hp_score, best_hp = _cross_validation(dataset_file, split_name, model_type, p, max_rules, n_cpu,
-                                                   progress_callback, warning_callback, error_callback)
+        best_hp_score, best_hp = _cross_validation(dataset_file=dataset_file, split_name=split_name,
+                                                   model_types=model_type, p_values=p, max_rules=max_rules,
+                                                   score_type="risk" if cv_fbeta is None else "fbeta", n_cpu=n_cpu,
+                                                   fbeta=cv_fbeta, progress_callback=progress_callback,
+                                                   warning_callback=warning_callback, error_callback=error_callback)
     else:
         # Use the first value provided for each parameter
         best_hp = {"model_type": model_type[0], "p": p[0], "max_rules": max_rules}

@@ -549,6 +549,10 @@ The most commonly used commands are:
                                  'k-fold cross-validation, where k is the number of folds defined in the split. Other '
                                  'strategies, such as bound selection are available (refer to the documentation). Using none '
                                  'selects the first value specified for each hyperparameter.', default='cv')
+        parser.add_argument('--cv-fbeta', type=float, help='Use a F-Beta score as the cross-validation score instead '
+                                                           'of the error rate. This parameter specifies the value of '
+                                                           'beta. Only use this if you know what you are doing.',
+                            default=None)
         parser.add_argument('--bound-max-genome-size', type=int, help='Specify this only if --hp-choice is bound. The '
                                                                       'maximum size, in base pairs, of any genome in the dataset. If you are unsure about this '
                                                                       'value, you should use an overestimation. This will only affect the tightness of the bound '
@@ -633,6 +637,7 @@ The most commonly used commands are:
                                 if args.bound_max_genome_size is not None
                                 else dataset_kmer_count,
                                 parameter_selection=args.hp_choice,
+                                cv_fbeta=args.cv_fbeta,
                                 n_cpu=args.n_cpu,
                                 random_seed=args.random_seed,
                                 progress_callback=progress)
@@ -678,8 +683,13 @@ The most commonly used commands are:
         report += "\n"
         report += "Hyperparameter Values:\n" + "-" * 22 + "\n"
         if args.hp_choice == "cv":
-            report += "Selection strategy: %d-fold cross-validation (score = %.5f)\n" % (
-                len(split.folds), best_hp_score)
+            if args.cv_fbeta is None:
+                report += "Selection strategy: %d-fold cross-validation (score = %.5f)\n" % (len(split.folds),
+                                                                                             best_hp_score)
+            else:
+                report += "Selection strategy: %d-fold cross-validation (F-%.4f score = %.5f)\n" % (len(split.folds),
+                                                                                                    args.cv_fbeta,
+                                                                                                    best_hp_score)
         elif args.hp_choice == "bound":
             report += "Selection strategy: bound selection (score = %.5f)\n" % best_hp_score
         else:
