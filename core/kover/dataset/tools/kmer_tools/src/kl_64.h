@@ -36,7 +36,7 @@ public:
 	KmerLister64 (size_t kmerSize);
 	void analyse(string input_file, string output_file, string filter, unsigned int compression, unsigned int chunk_size, Callable& progressbar);
 	void bit_shift(packing_type* p_buffer, unsigned long* p_nb_kmers);
-	string convert(bitset<64> bits);
+	string convert(bitset<64> bits, int* thresholds, int thresh);
 	
 private:
 	unordered_map<bitset<64>, unsigned long> k_map;

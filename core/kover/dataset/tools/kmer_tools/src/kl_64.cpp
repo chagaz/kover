@@ -22,12 +22,14 @@
 
 struct Options_64
 {
-	Options_64 (Storage* storage, size_t kmerSize,const unordered_map<bitset<64>, unsigned long>& k_map, KmerLister64::packing_type* p_buffer)
-	:storage(storage), kmerSize(kmerSize), k_map(k_map), p_buffer(p_buffer) {}
+	Options_64 (Storage* storage, size_t kmerSize,const unordered_map<bitset<64>, unsigned long>& k_map, KmerLister64::packing_type* p_buffer, int* thresholds, int nb_thresholds)
+	:storage(storage), kmerSize(kmerSize), k_map(k_map), p_buffer(p_buffer), thresholds(thresholds), nb_thresholds(nb_thresholds) {}
 	Storage*   storage;
 	size_t     kmerSize;
 	const unordered_map<bitset<64>, unsigned long>& k_map;
 	KmerLister64::packing_type* p_buffer;
+	int* thresholds;
+	int nb_thresholds;
 };	
 
 template<size_t span> struct Functor_Analyse_All_64 {void operator () (Options_64 options)
@@ -36,6 +38,8 @@ template<size_t span> struct Functor_Analyse_All_64 {void operator () (Options_6
 	size_t     kmerSize = options.kmerSize;
 	const unordered_map<bitset<64>, unsigned long>& k_map = options.k_map;
 	KmerLister64::packing_type* p_buffer = options.p_buffer;
+	int* p_thresholds = options.thresholds;
+	int nb_thresholds = options.nb_thresholds;
 	
 	typedef typename Kmer<span>::Count Count;
 
@@ -61,6 +65,8 @@ template<size_t span> struct Functor_Analyse_Filter_64 {void operator () (Option
 	size_t     kmerSize = options.kmerSize;
 	const unordered_map<bitset<64>, unsigned long>& k_map = options.k_map;
 	KmerLister64::packing_type* p_buffer = options.p_buffer;
+	int* p_thresholds = options.thresholds;
+	int nb_thresholds = options.nb_thresholds;
 	
 	typedef typename Kmer<span>::Count Count;
 
@@ -80,6 +86,11 @@ template<size_t span> struct Functor_Analyse_Filter_64 {void operator () (Option
 		{
 			// Adding presence in the kmers-genome array at the kmer column
 			p_buffer[k_map.at(bits)] += 1;
+			for (int i = 0; i < nb_thresholds; i++){
+				if (count.abundance > p_thresholds[i]){
+					p_buffer[k_map.at(bits)+(i+1)*k_map.size()] += 1;
+				}
+			}
 		}
 	}
 }};
@@ -172,6 +183,10 @@ KmerLister64::KmerLister64 (size_t kmerSize):kmerSize(kmerSize)
 /** */
 void KmerLister64::analyse(string input_file, string output_file, string filter, unsigned int compression, unsigned int chunk_size, Callable& callable)
 {
+	//This is for occurences proof of concept dummy version
+	int nb_thresholds = 5;
+	int thresholds[nb_thresholds] = {1,2,3,4,5};
+	
 	string line;
 	// Opening file containing list of files from dsk to process
 	ifstream h5_list (input_file);
@@ -212,6 +227,10 @@ void KmerLister64::analyse(string input_file, string output_file, string filter,
 	
 	// Clearing unordered_set
 	k_set.clear();
+	
+	// Updating number of kmer according to thresholds
+	unsigned long base_nb_kmers = nb_kmers;
+	nb_kmers = (nb_thresholds + 1)*nb_kmers;
 	
 	// Initializing hdf5 interface (dcpl = dataset creation property list)
 	hid_t    dataset, datatype, dataspace, memspace, dcpl_matrix;
@@ -304,11 +323,11 @@ void KmerLister64::analyse(string input_file, string output_file, string filter,
 					// Launching functor to read kmers and create array with adequate filtering mode
 					if (filter == "nothing")
 					{
-						Integer::apply<Functor_Analyse_All_64,Options_64> (kmerSize, Options_64(storage, kmerSize, k_map, buffer));
+						Integer::apply<Functor_Analyse_All_64,Options_64> (kmerSize, Options_64(storage, kmerSize, k_map, buffer, thresholds, nb_thresholds));
 					}
 					else if (filter == "singleton")
 					{
-						Integer::apply<Functor_Analyse_Filter_64,Options_64> (kmerSize, Options_64(storage, kmerSize, k_map, buffer));
+						Integer::apply<Functor_Analyse_Filter_64,Options_64> (kmerSize, Options_64(storage, kmerSize, k_map, buffer, thresholds, nb_thresholds));
 					}
 					callable();
 					
@@ -394,8 +413,10 @@ void KmerLister64::analyse(string input_file, string output_file, string filter,
 			unsigned int element = kmer_checked % block_size;
 			
 			// Filling buffers
-			string_buffer[element] = strdup(convert(iter->first).c_str());
-			index[iter->second] = kmer_checked;
+			int thresh = kmer_checked / base_nb_kmers;
+			string_buffer[element] = strdup(convert(iter->first, thresholds, thresh).c_str());
+			
+			index[iter->second + thresh*k_map.size()] = kmer_checked;
 			
 			// Case buffer is filled
 			if ( element == (block_size -1))
@@ -412,6 +433,9 @@ void KmerLister64::analyse(string input_file, string output_file, string filter,
 				}
 			}
 			iter++;
+			if (iter == k_map.end()){
+				iter = k_map.begin();
+			}
 		}
 		
 		// Last block of size smaller compare to block_size
@@ -499,9 +523,16 @@ void KmerLister64::bit_shift(packing_type* p_buffer, unsigned long* p_nb_kmers)
 	}
 }
 
-string KmerLister64::convert(bitset<64> bits)
+string KmerLister64::convert(bitset<64> bits, int* thresholds, int thresh)
 {
-	char seq[kmerSize + 1];
+	unsigned int size = 0;
+	if (thresh) {
+		size = kmerSize + 3;
+	}
+	else {
+		size = kmerSize + 1;
+	}
+	char seq[size];
 	char bin2NT[2][2] = {{'A', 'T'}, {'C', 'G'}};
 	
 	for (int i = kmerSize - 1; i >= 0; i--)
@@ -509,7 +540,11 @@ string KmerLister64::convert(bitset<64> bits)
 		seq[i] = bin2NT[bits[0]][bits[1]];
 		bits = bits>>2;
 	}
-	seq[kmerSize] = '\0';
+	if (thresh) {
+		seq[size -3] = '>';
+		seq[size -2] = '0' + thresholds[thresh-1];
+	}
+	seq[size - 1] = '\0';
 	return seq;
 }
 
