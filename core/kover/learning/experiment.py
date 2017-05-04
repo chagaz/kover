@@ -170,7 +170,11 @@ def _cv_score_hp(hp_values, max_rules, dataset_file, split_name, score_type="ris
         elif score_type == "fbeta":
             precision = np.array(metrics["precision"])
             recall = np.array(metrics["recall"])
+            mask= np.logical_and(np.isclose(precision, 0.0),np.isclose(recall, 0.0))
+            precision = np.ma.masked_array(precision, mask)
+            recall = np.ma.masked_array(recall, mask)
             fbeta_score = (1.0 + fbeta**2) * precision * recall / ((fbeta**2 * precision) + recall)
+            fbeta_score[mask] = -np.inf
             fold_score_by_model_length[i] = -1.0 * fbeta_score  # to fit into the minimizing machinery
 
     score_by_model_length = np.mean(fold_score_by_model_length, axis=0)
