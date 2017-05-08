@@ -340,6 +340,10 @@ The two available data sources are:
                                                              'training the learning algorithm (default is 0.5). Alternatively, you can specify which '
                                                              'genomes to use for training and testing by using --train-ids and --test-ids.',
                             default=0.5)
+        parser.add_argument('--undersampling', type=float, help='Adjust the positive and negative examples distribution.'
+                                                                'The value is used to determine the ratio between the majority and minority class.'
+                                                                'Default value is 0.0 which is interpreted as no undersampling',
+                            default=0.0)
         parser.add_argument('--train-ids', type=str, nargs='+', help='The identifiers of the genomes used to train the '
                                                                      'learning algorithm. If you provide a value for this argument, you must also provide a '
                                                                      'value for --test-ids.')
@@ -412,6 +416,7 @@ The two available data sources are:
             split_with_proportion(input=args.dataset,
                                   split_name=args.id,
                                   train_prop=args.train_size,
+                                  undersampling=args.undersampling,
                                   random_seed=args.random_seed,
                                   n_folds=args.folds,
                                   progress_callback=progress)

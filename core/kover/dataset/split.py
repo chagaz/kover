@@ -71,7 +71,7 @@ def split_with_ids(input, split_name, train_ids, test_ids, random_seed, n_folds,
            warning_callback=warning_callback, error_callback=error_callback, progress_callback=progress_callback)
 
 
-def split_with_proportion(input, split_name, train_prop, random_seed, n_folds, warning_callback=None, error_callback=None,
+def split_with_proportion(input, split_name, train_prop, undersampling, random_seed, n_folds, warning_callback=None, error_callback=None,
                           progress_callback=None):
     
     # Execution callback functions
@@ -90,8 +90,38 @@ def split_with_proportion(input, split_name, train_prop, random_seed, n_folds, w
 
     # Randomly split the genome indexes into a training and testing set
     n_genomes = dataset.genome_count
+    idx = None
+    
+    # Normal case
+    if (undersampling == 0.0):
+        idx = np.arange(n_genomes)
+        
+    # With undersampling of the majority class
+    else:
+        metadata = np.array((dataset.phenotype).metadata)
+        idx_dict = {'positive' :(np.where(metadata))[0],
+                    'negative' : (np.where(metadata == 0))[0] }
+                    
+        # Finding the minority and majority class
+        min_class = 'positive'
+        maj_class = 'negative'
+        if(idx_dict['positive'].shape[0] > idx_dict['negative'].shape[0]):
+            min_class = 'negative'
+            maj_class = 'positive'
+        
+        # Undersampling the majority class by choosing a restricted number of examples idx of this class
+        maj_class_size = idx_dict[maj_class].shape[0]
+        min_class_size = idx_dict[min_class].shape[0]
+        if (int(ceil(min_class_size*undersampling)) > maj_class_size):
+            warning_callback("Undersampling is greater than majority class size, split will be unaffected")
+            idx = np.arange(n_genomes)
+        else :
+            maj_sample_size = int(ceil(min_class_size*undersampling))
+            random_generator.shuffle(idx_dict[maj_class])
+            idx = np.append(((idx_dict[maj_class])[:maj_sample_size]),(idx_dict[min_class]))
+            n_genomes = idx.shape[0]
+            
     n_train = int(ceil(train_prop * n_genomes))
-    idx = np.arange(n_genomes)
     random_generator.shuffle(idx)
     train_idx = idx[:n_train]
     test_idx = idx[n_train:]
