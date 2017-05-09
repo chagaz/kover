@@ -71,7 +71,7 @@ def split_with_ids(input, split_name, train_ids, test_ids, random_seed, n_folds,
            warning_callback=warning_callback, error_callback=error_callback, progress_callback=progress_callback)
 
 
-def split_with_proportion(input, split_name, train_prop, undersampling, random_seed, n_folds, warning_callback=None, error_callback=None,
+def split_with_proportion(input, split_name, train_prop, undersampling, cut_test, random_seed, n_folds, warning_callback=None, error_callback=None,
                           progress_callback=None):
     
     # Execution callback functions
@@ -91,6 +91,7 @@ def split_with_proportion(input, split_name, train_prop, undersampling, random_s
     # Randomly split the genome indexes into a training and testing set
     n_genomes = dataset.genome_count
     idx = None
+    maj_sample_size = 0
     
     # Normal case
     if (undersampling == 0.0):
@@ -125,6 +126,8 @@ def split_with_proportion(input, split_name, train_prop, undersampling, random_s
     random_generator.shuffle(idx)
     train_idx = idx[:n_train]
     test_idx = idx[n_train:]
+    if(not(cut_test) and maj_sample_size):
+        test_idx = np.append(test_idx, (idx_dict[maj_class])[maj_sample_size:])
 
     _split(dataset=dataset, split_name=split_name, train_idx=train_idx, test_idx=test_idx,
            random_generator=random_generator, random_seed=random_seed, n_folds=n_folds,
