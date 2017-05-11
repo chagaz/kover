@@ -92,10 +92,16 @@ def split_with_proportion(input, split_name, train_prop, undersampling, cut_test
     n_genomes = dataset.genome_count
     idx = None
     maj_sample_size = 0
+    train_idx = None
+    test_idx = None
     
     # Normal case
     if (undersampling == 0.0):
         idx = np.arange(n_genomes)
+        n_train = int(ceil(train_prop * n_genomes))
+        random_generator.shuffle(idx)
+        train_idx = idx[:n_train]
+        test_idx = idx[n_train:]
         
     # With undersampling of the majority class
     else:
@@ -118,16 +124,33 @@ def split_with_proportion(input, split_name, train_prop, undersampling, cut_test
             idx = np.arange(n_genomes)
         else :
             maj_sample_size = int(ceil(min_class_size*undersampling))
-            random_generator.shuffle(idx_dict[maj_class])
-            idx = np.append(((idx_dict[maj_class])[:maj_sample_size]),(idx_dict[min_class]))
-            n_genomes = idx.shape[0]
-            
-    n_train = int(ceil(train_prop * n_genomes))
-    random_generator.shuffle(idx)
-    train_idx = idx[:n_train]
-    test_idx = idx[n_train:]
-    if(not(cut_test) and maj_sample_size):
-        test_idx = np.append(test_idx, (idx_dict[maj_class])[maj_sample_size:])
+            if(not(cut_test)):
+                random_generator.shuffle(idx_dict[maj_class])
+                idx = np.append(((idx_dict[maj_class])[:maj_sample_size]),(idx_dict[min_class]))
+                n_genomes = idx.shape[0]
+                n_train = int(ceil(train_prop * n_genomes))
+                random_generator.shuffle(idx)
+                train_idx = idx[:n_train]
+                test_idx = idx[n_train:]
+                test_idx = np.append(test_idx, (idx_dict[maj_class])[maj_sample_size:])
+            else:
+                idx = np.arange(n_genomes)
+                n_train = int(ceil(train_prop * n_genomes))
+                random_generator.shuffle(idx)
+                train_idx = (idx[:n_train]).tolist()
+                test_idx = idx[n_train:]
+                train_size = int(ceil((train_prop * (maj_sample_size + min_class_size))))
+                maj_class_to_del = len(train_idx) - train_size
+                maj_ids = idx_dict[maj_class].tolist()
+                min_ids = idx_dict[min_class].tolist()
+                i = 0
+                del_list = []
+                while(maj_class_to_del != 0):
+                    if train_idx[i] in maj_ids:
+                        del_list.append(train_idx[i])
+                        maj_class_to_del -= 1
+                    i += 1
+                train_idx = [i for i in train_idx if i not in del_list]
 
     _split(dataset=dataset, split_name=split_name, train_idx=train_idx, test_idx=test_idx,
            random_generator=random_generator, random_seed=random_seed, n_folds=n_folds,
