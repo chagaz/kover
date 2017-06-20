@@ -265,3 +265,92 @@ class KmerRuleClassifications(BaseRuleClassifications):
         result[self.dataset.shape[1] : ] = len(rows) - result[: self.dataset.shape[1]]
 
         return result
+
+
+class MultiTypeRuleClassifications(BaseRuleClassifications):
+    """
+    Rule classifications for multiple sets of rules that each have their own rule classification object.
+
+    """
+    def __init__(self, rule_classifications):
+
+        # Check that the shapes are compatible
+        if not len(set(rc.shape[0] for rc in rule_classifications)) == 1:
+            raise Exception("The rule classifications must contain the same number of examples (rows).")
+        self.rule_classifications = rule_classifications
+
+        # Generate a dictionnary that tells us which indices are in which rule_classifications
+        self.index = BetweenDict()
+        total_columns = 0
+        self.offsets = []
+        for i, rc in enumerate(self.rule_classifications):
+            self.offsets.append(total_columns)
+            self.index[(total_columns, total_columns + rc.shape[1])] = i
+            total_columns += rc.shape[1]
+
+    def get_columns(self, columns):
+        # Figure out which columns are in which rule classifications (watch out for the inverse rules)
+        # I think shape takes the inverse rules into account
+        columns_is_int = False
+        if hasattr(columns, "__index__"):  # All int types implement the __index__ method (PEP 357)
+            columns = [columns.__index__()]
+            columns_is_int = True
+        elif isinstance(columns, np.ndarray):
+            columns = columns.tolist()
+        elif isinstance(columns, list):
+            pass
+        else:
+            columns = list(columns)
+
+        # Partition the column indices based on the corresponding rule_classifications
+        dispatch = [[] for _ in xrange(len(self.rule_classifications))]  # Used to recover the columns from a particular rc
+        undispatch = [[] for _ in xrange(len(self.rule_classifications))]  # Used to place the columns at the right place in the result
+        for i, idx in enumerate(columns):
+            rc_idx = self.index[idx]
+            dispatch[rc_idx].append(idx - self.offsets[rc_idx])
+            undispatch[rc_idx].append(i)
+
+        result = np.zeros((self.shape[0], len(columns)))
+        for rc_idx, (d, u) in enumerate(izip(dispatch, undispatch)):
+            if len(d) > 0:
+                result[:, u] = self.rule_classifications[rc_idx].get_columns(d)
+
+        if columns_is_int:
+            return result.reshape(-1)
+        else:
+            return result
+
+    @property
+    def shape(self):
+        return self.rule_classifications[0].shape[0], sum(rc.shape[1] for rc in self.rule_classifications)
+
+    def sum_rows(self, rows):
+        return np.hstack((rc.sum_rows(rows) for rc in self.rule_classifications))
+
+
+class MultiRuleList(object):
+    """
+    Rule list that combines multiple lists of rules
+
+    """
+    def __init__(self, rule_lists):
+        self.rule_lists = rule_lists
+
+        # Generate a dictionnary that tells us which indices are in which list a rule is
+        self.index = BetweenDict()
+        total_rules = 0
+        self.offsets = []
+        for i, r in enumerate(rule_lists):
+            self.offsets.append(total_rules)
+            self.index[(total_rules, total_rules + len(r))] = i
+            total_rules += len(r)
+        self.n_rules = total_rules
+
+    def __getitem__(self, idx):
+        if idx >= self.n_rules:
+            raise ValueError("Index %d is out of range for list of size %d" % (idx, self.n_rules))
+        r_idx = self.index[idx]
+        return self.rule_lists[r_idx][idx - self.offsets[r_idx]]
+
+    def __len__(self):
+        return self.n_rules
